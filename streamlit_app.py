@@ -1,53 +1,98 @@
 import streamlit as st
 from openai import OpenAI
+import os
 
 # Show title and description.
-st.title("📄 Document question answering")
+st.title("💬 Chatbot - Super - Gaston")
 st.write(
-    "Upload a document below and ask a question about it – GPT will answer! "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
+    "Soc en Gaston, el xat de la Neus, la superprofe de l'Àlex"
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
+# Obtener la API Key desde secrets o variables de entorno
+openai_api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
 if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+    st.error("⚠️ No se encontró la API Key. Configúrala en Streamlit Secrets o como variable de entorno.", icon="🚨")
+    st.stop()
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Crear el cliente de OpenAI
+client = OpenAI(api_key=openai_api_key)
 
-    # Let the user upload a file via `st.file_uploader`.
-    uploaded_file = st.file_uploader(
-        "Upload a document (.txt or .md)", type=("txt", "md")
-    )
+# Mensaje de sistema personalizado para el chatbot
+SYSTEM_PROMPT = "Eres un asistente amigable y servicial para la profesora Neus. Tienes un gran sentido del humor y eres bastante canalla, la vas a ayudar en todo lo que te pida, pero tus respuestas van a ser irreverentes y con gran sentido del humor."
 
-    # Ask the user for a question via `st.text_area`.
-    question = st.text_area(
-        "Now ask a question about the document!",
-        placeholder="Can you give me a short summary?",
-        disabled=not uploaded_file,
-    )
+# Inicializar el estado de sesión si aún no existe
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if uploaded_file and question:
+# Agregar el mensaje del sistema solo si no está ya presente
+if not any(m["role"] == "system" for m in st.session_state.messages):
+    st.session_state.messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
-        # Process the uploaded file and question.
-        document = uploaded_file.read().decode()
-        messages = [
-            {
-                "role": "user",
-                "content": f"Here's a document: {document} \n\n---\n\n {question}",
-            }
-        ]
+# Cargar archivos
+uploaded_file = st.file_uploader("Puja un document", type=["txt", "pdf"])
 
-        # Generate an answer using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            stream=True,
+# Mostrar mensajes anteriores (excepto el system prompt)
+for message in st.session_state.messages:
+    if message["role"] != "system":
+        align = "right" if message["role"] == "user" else "left"
+        with st.chat_message(message["role"]):
+            st.markdown(
+                f"""
+                <div style='display: flex; justify-content: {align};'>
+                    <div style='background-color: {'#DCF8C6' if align == 'right' else '#E5E5EA'}; padding: 10px; border-radius: 10px; max-width: 70%;'>
+                        {message['content']}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+# Campo de entrada para el usuario
+question = st.chat_input("escriu aquí si t'atreveixes...")
+
+if uploaded_file and question:
+    document_content = uploaded_file.read().decode()
+    prompt = f"Aquí tienes un documento: {document_content} \n\n---\n\n {question}"
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(
+            f"""
+            <div style='display: flex; justify-content: right;'>
+                <div style='background-color: #DCF8C6; padding: 10px; border-radius: 10px; max-width: 70%;'>
+                    {question}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-        # Stream the response to the app using `st.write_stream`.
-        st.write_stream(stream)
+    # Generar respuesta de OpenAI
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=st.session_state.messages,
+        stream=True,
+    )
+
+    # Mostrar la respuesta y almacenarla
+    with st.chat_message("assistant"):
+        full_response = ""
+        response_container = st.empty()
+        for chunk in response:
+            content = getattr(chunk.choices[0].delta, "content", "")
+            if content:
+                full_response += content
+                response_container.markdown(
+                    f"""
+                    <div style='display: flex; justify-content: left;'>
+                        <div style='background-color: #E5E5EA; padding: 10px; border-radius: 10px; max-width: 70%;'>
+                            {full_response}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
+
